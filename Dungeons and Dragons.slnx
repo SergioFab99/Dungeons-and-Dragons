@@ -1,4 +1,7 @@
 ﻿<Solution>
+  <Project Path="DungeonRpg.Runtime.csproj" />
+  <Project Path="DungeonRpg.Editor.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="DungeonRpg.EditModeTests.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
 </Solution>
