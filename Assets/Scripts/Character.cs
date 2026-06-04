@@ -50,6 +50,11 @@ namespace DungeonRpg
             return true;
         }
 
+        public bool CanMoveTo(GridPosition targetPosition)
+        {
+            return gridManager != null && gridManager.CanEnter(targetPosition);
+        }
+
         public void TakeDamage(int damage)
         {
             if (damage <= 0 || !IsAlive)

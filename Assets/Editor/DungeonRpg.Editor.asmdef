@@ -4,7 +4,10 @@
     "references": [
         "DungeonRpg.Runtime",
         "UnityEngine.UI",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "Unity.GraphToolkit.Common.Editor",
+        "Unity.GraphToolkit.Utility.Editor",
+        "Unity.GraphToolkit.Editor"
     ],
     "includePlatforms": [
         "Editor"

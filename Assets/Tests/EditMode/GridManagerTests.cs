@@ -43,6 +43,47 @@ namespace DungeonRpg.Tests
             Assert.IsTrue(grid.IsOccupied(new GridPosition(1, 0)));
         }
 
+        [Test]
+        public void GridToWorld_UsesAuthoredTileCenters()
+        {
+            Dictionary<GridPosition, Vector3> centers = new Dictionary<GridPosition, Vector3>
+            {
+                [new GridPosition(0, 0)] = new Vector3(10f, 0f, 20f),
+                [new GridPosition(1, 0)] = new Vector3(12f, 0f, 20f)
+            };
+            GridManager grid = new GridManager(centers, new List<GridPosition>());
+
+            Assert.AreEqual(centers[new GridPosition(1, 0)], grid.GridToWorld(new GridPosition(1, 0)));
+        }
+
+        [Test]
+        public void WorldToGrid_ReturnsNearestAuthoredTile()
+        {
+            Dictionary<GridPosition, Vector3> centers = new Dictionary<GridPosition, Vector3>
+            {
+                [new GridPosition(0, 0)] = new Vector3(-5f, 0f, -5f),
+                [new GridPosition(1, 0)] = new Vector3(4f, 0f, 2f),
+                [new GridPosition(0, 1)] = new Vector3(-5f, 0f, 5f)
+            };
+            GridManager grid = new GridManager(centers, new List<GridPosition>());
+
+            Assert.AreEqual(new GridPosition(1, 0), grid.WorldToGrid(new Vector3(4.4f, 3f, 2.2f)));
+        }
+
+        [Test]
+        public void AuthoredGrid_BlocksAuthoredWallPositions()
+        {
+            Dictionary<GridPosition, Vector3> centers = new Dictionary<GridPosition, Vector3>
+            {
+                [new GridPosition(0, 0)] = new Vector3(10f, 0f, 20f),
+                [new GridPosition(1, 0)] = new Vector3(12f, 0f, 20f)
+            };
+            GridManager grid = new GridManager(centers, new[] { new GridPosition(1, 0) });
+
+            Assert.IsTrue(grid.CanEnter(new GridPosition(0, 0)));
+            Assert.IsFalse(grid.CanEnter(new GridPosition(1, 0)));
+        }
+
         private class FakeOccupant : IGridOccupant
         {
             public GridPosition GridPosition { get; private set; }

@@ -5,14 +5,14 @@ namespace DungeonRpg
 {
     public class DungeonGameBootstrapper : MonoBehaviour
     {
-        private const int Width = 8;
-        private const int Height = 8;
-        private const float CellSize = 1.2f;
-        private static readonly GridPosition TreasurePosition = new GridPosition(7, 7);
+        private const float CharacterHeightOffset = 0.55f;
+        private const float TreasureHeightOffset = 0.25f;
 
+        [SerializeField] private Transform boardRoot;
         [SerializeField] private PlayerCharacter player;
         [SerializeField] private List<EnemyCharacter> enemies = new List<EnemyCharacter>();
         [SerializeField] private Transform treasure;
+        [SerializeField] private DynamicDice movementDie;
         [SerializeField] private TurnManager turnManager;
         [SerializeField] private UIManager uiManager;
 
@@ -31,10 +31,19 @@ namespace DungeonRpg
                 return;
             }
 
-            GridManager gridManager = new GridManager(Width, Height, CreateWalls(), CellSize, new Vector3(-4.2f, 0f, -4.2f));
-            uiManager.Initialize(turnManager);
+            if (!TryBuildSceneGrid(out GridManager gridManager, out GridPosition treasurePosition))
+            {
+                enabled = false;
+                return;
+            }
 
-            player.Configure("Hero", new CharacterStats(20, 3, 12, 4), new GridPosition(0, 0), gridManager);
+            if (!TryGetStartPosition(gridManager, player.transform, "Hero", out GridPosition playerStartPosition))
+            {
+                enabled = false;
+                return;
+            }
+
+            player.Configure("Hero", new CharacterStats(20, 3, 12, 4), playerStartPosition, gridManager);
             List<EnemyCharacter> livingEnemies = new List<EnemyCharacter>();
             for (int index = 0; index < enemies.Count; index++)
             {
@@ -44,36 +53,60 @@ namespace DungeonRpg
                     continue;
                 }
 
-                GridPosition startPosition = GetEnemyStartPosition(index);
+                if (!TryGetStartPosition(gridManager, enemy.transform, enemy.name, out GridPosition startPosition))
+                {
+                    enabled = false;
+                    return;
+                }
+
                 enemy.Configure($"Goblin {index + 1}", new CharacterStats(8, 1, 10, 3), startPosition, gridManager);
                 livingEnemies.Add(enemy);
             }
 
-            turnManager.Configure(player, livingEnemies, TreasurePosition, uiManager);
+            turnManager.SetMovementDie(movementDie);
+            turnManager.Configure(player, livingEnemies, treasurePosition, uiManager);
+            uiManager.Initialize(turnManager);
             turnManager.StartGame();
         }
 
-        public static List<GridPosition> CreateWalls()
+        private bool TryBuildSceneGrid(out GridManager gridManager, out GridPosition treasurePosition)
         {
-            return new List<GridPosition>
+            gridManager = null;
+            treasurePosition = default;
+
+            if (!TryReadTileCenters(out Dictionary<GridPosition, Vector3> tileCenters))
             {
-                new GridPosition(1, 1),
-                new GridPosition(2, 1),
-                new GridPosition(3, 1),
-                new GridPosition(5, 0),
-                new GridPosition(5, 1),
-                new GridPosition(5, 2),
-                new GridPosition(1, 3),
-                new GridPosition(2, 3),
-                new GridPosition(4, 4),
-                new GridPosition(5, 4),
-                new GridPosition(6, 4),
-                new GridPosition(3, 5)
-            };
+                return false;
+            }
+
+            List<GridPosition> wallPositions = ReadWallPositions(tileCenters);
+            gridManager = new GridManager(tileCenters, wallPositions);
+            treasurePosition = gridManager.WorldToGrid(treasure.position);
+
+            if (!gridManager.TryGetTile(treasurePosition, out TileData treasureTile))
+            {
+                Debug.LogError("Treasure is not close to any authored dungeon tile.");
+                return false;
+            }
+
+            if (!treasureTile.IsWalkable)
+            {
+                Debug.LogError($"Treasure is on wall tile {treasurePosition}. Move it to a walkable tile.");
+                return false;
+            }
+
+            treasure.position = gridManager.GridToWorld(treasurePosition) + Vector3.up * TreasureHeightOffset;
+            return true;
         }
 
         private void ResolveSceneReferences()
         {
+            if (boardRoot == null)
+            {
+                GameObject boardObject = GameObject.Find("Dungeon Board");
+                boardRoot = boardObject != null ? boardObject.transform : null;
+            }
+
             if (turnManager == null)
             {
                 turnManager = GetComponent<TurnManager>();
@@ -99,15 +132,22 @@ namespace DungeonRpg
                 GameObject treasureObject = GameObject.Find("Golden Treasure");
                 treasure = treasureObject != null ? treasureObject.transform : null;
             }
+
+            if (movementDie == null)
+            {
+                movementDie = FindFirstObjectByType<DynamicDice>();
+            }
         }
 
         private bool ValidateSceneReferences()
         {
             bool valid = true;
+            valid &= ReportMissing(boardRoot, "Dungeon Board");
             valid &= ReportMissing(player, "PlayerCharacter");
             valid &= ReportMissing(turnManager, "TurnManager");
             valid &= ReportMissing(uiManager, "UIManager");
             valid &= ReportMissing(treasure, "Golden Treasure");
+            valid &= ReportMissing(movementDie, "DynamicDice");
             valid &= enemies.Count > 0;
 
             if (enemies.Count == 0)
@@ -116,6 +156,99 @@ namespace DungeonRpg
             }
 
             return valid;
+        }
+
+        private bool TryReadTileCenters(out Dictionary<GridPosition, Vector3> tileCenters)
+        {
+            tileCenters = new Dictionary<GridPosition, Vector3>();
+            GridTileAuthoring[] authoredTiles = boardRoot.GetComponentsInChildren<GridTileAuthoring>(false);
+            if (authoredTiles.Length == 0)
+            {
+                Debug.LogError("Dungeon Board needs GridTileAuthoring markers on its tile objects.");
+                return false;
+            }
+
+            foreach (GridTileAuthoring tile in authoredTiles)
+            {
+                if (tileCenters.ContainsKey(tile.GridPosition))
+                {
+                    Debug.LogError($"Dungeon Board has more than one tile marked as {tile.GridPosition}.");
+                    return false;
+                }
+
+                tileCenters[tile.GridPosition] = tile.WorldCenter;
+            }
+
+            return true;
+        }
+
+        private List<GridPosition> ReadWallPositions(IReadOnlyDictionary<GridPosition, Vector3> tileCenters)
+        {
+            List<GridPosition> walls = new List<GridPosition>();
+            HashSet<GridPosition> uniqueWalls = new HashSet<GridPosition>();
+            Transform[] sceneTransforms = boardRoot.GetComponentsInChildren<Transform>(false);
+            foreach (Transform sceneTransform in sceneTransforms)
+            {
+                if (sceneTransform == boardRoot || !sceneTransform.name.StartsWith("Wall"))
+                {
+                    continue;
+                }
+
+                GridPosition wallPosition = FindNearestTile(tileCenters, sceneTransform.position);
+                if (uniqueWalls.Add(wallPosition))
+                {
+                    walls.Add(wallPosition);
+                }
+            }
+
+            return walls;
+        }
+
+        private bool TryGetStartPosition(GridManager gridManager, Transform actorTransform, string actorName, out GridPosition position)
+        {
+            position = gridManager.WorldToGrid(actorTransform.position);
+            if (!gridManager.TryGetTile(position, out TileData tile))
+            {
+                Debug.LogError($"{actorName} is not close to any authored dungeon tile.");
+                return false;
+            }
+
+            if (!tile.IsWalkable)
+            {
+                Debug.LogError($"{actorName} is on wall tile {position}. Move it to a walkable tile.");
+                return false;
+            }
+
+            if (tile.Occupant != null)
+            {
+                Debug.LogError($"{actorName} shares tile {position} with another character. Move one piece to a different tile.");
+                return false;
+            }
+
+            actorTransform.position = gridManager.GridToWorld(position) + Vector3.up * CharacterHeightOffset;
+            return true;
+        }
+
+        private GridPosition FindNearestTile(IReadOnlyDictionary<GridPosition, Vector3> tileCenters, Vector3 worldPosition)
+        {
+            bool foundTile = false;
+            GridPosition bestPosition = default;
+            float bestDistance = float.PositiveInfinity;
+
+            foreach (KeyValuePair<GridPosition, Vector3> tileCenter in tileCenters)
+            {
+                float deltaX = worldPosition.x - tileCenter.Value.x;
+                float deltaZ = worldPosition.z - tileCenter.Value.z;
+                float distance = deltaX * deltaX + deltaZ * deltaZ;
+                if (!foundTile || distance < bestDistance)
+                {
+                    foundTile = true;
+                    bestDistance = distance;
+                    bestPosition = tileCenter.Key;
+                }
+            }
+
+            return bestPosition;
         }
 
         private bool ReportMissing(Object reference, string referenceName)
@@ -127,18 +260,6 @@ namespace DungeonRpg
 
             Debug.LogError($"Dungeon scene is missing required reference: {referenceName}.");
             return false;
-        }
-
-        private GridPosition GetEnemyStartPosition(int enemyIndex)
-        {
-            GridPosition[] positions =
-            {
-                new GridPosition(4, 1),
-                new GridPosition(6, 5),
-                new GridPosition(2, 6)
-            };
-
-            return positions[Mathf.Clamp(enemyIndex, 0, positions.Length - 1)];
         }
     }
 }

@@ -32,16 +32,22 @@ namespace DungeonRpg
                 return;
             }
 
+            if (Keyboard.current != null && Keyboard.current.tKey.wasPressedThisFrame)
+            {
+                activeTurnManager.RequestPlayerRoll();
+                return;
+            }
+
             GridPosition direction;
             if (TryReadMoveDirection(out direction))
             {
-                TryMoveAndEndTurn(direction);
+                TryMoveDirection(direction);
                 return;
             }
 
             if (WasAttackPressed())
             {
-                TryAttackAndEndTurn();
+                TryAttackAction();
             }
         }
 
@@ -89,8 +95,14 @@ namespace DungeonRpg
                 || (mouse != null && mouse.leftButton.wasPressedThisFrame);
         }
 
-        private void TryMoveAndEndTurn(GridPosition direction)
+        public void TryMoveDirection(GridPosition direction)
         {
+            if (!activeTurnManager.CanPlayerMove)
+            {
+                activeTurnManager.ReportMessage(activeTurnManager.PlayerHasRolledMovement ? "noMovesLeft" : "rollFirst");
+                return;
+            }
+
             GridPosition target = GridPosition + direction;
             if (!TryMove(target))
             {
@@ -98,13 +110,17 @@ namespace DungeonRpg
                 return;
             }
 
-            acceptsInput = false;
-            activeTurnManager.ReportMessage("playerMoved", DisplayName, target);
-            activeTurnManager.CompleteActorTurn(this);
+            activeTurnManager.TryConsumePlayerMove(this, target);
         }
 
-        private void TryAttackAndEndTurn()
+        public void TryAttackAction()
         {
+            if (!activeTurnManager.CanPlayerUseAction)
+            {
+                activeTurnManager.ReportMessage("rollFirst");
+                return;
+            }
+
             EnemyCharacter enemy = activeTurnManager.FindAdjacentEnemy(GridPosition);
             if (enemy == null)
             {
@@ -115,6 +131,11 @@ namespace DungeonRpg
             acceptsInput = false;
             activeTurnManager.ResolveAttack(this, enemy);
             activeTurnManager.CompleteActorTurn(this);
+        }
+
+        public void StopAcceptingInput()
+        {
+            acceptsInput = false;
         }
     }
 }

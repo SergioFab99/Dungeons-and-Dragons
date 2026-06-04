@@ -1,8 +1,6 @@
 using System.Collections.Generic;
-using System.Text;
 using UnityEngine;
 using UnityEngine.EventSystems;
-using UnityEngine.InputSystem.UI;
 using UnityEngine.UI;
 
 namespace DungeonRpg
@@ -10,35 +8,40 @@ namespace DungeonRpg
     public class UIManager : MonoBehaviour
     {
         private readonly Dictionary<string, BilingualText> texts = new Dictionary<string, BilingualText>();
-        private Text titleText;
-        private Text objectiveText;
-        private Text statusText;
-        private Text turnText;
-        private Text messageText;
-        private Text historyText;
-        private Text restartButtonText;
-        private Font defaultFont;
 
-        public void Initialize(TurnManager turnManager)
+        [SerializeField] private Text titleText;
+        [SerializeField] private Text objectiveText;
+        [SerializeField] private Text statusText;
+        [SerializeField] private Text turnText;
+        [SerializeField] private Text movementText;
+        [SerializeField] private Text messageText;
+        [SerializeField] private Text historyText;
+
+        [SerializeField] private Button rollButton;
+        [SerializeField] private Text rollButtonText;
+        [SerializeField] private Button attackButton;
+        [SerializeField] private Text attackButtonText;
+        [SerializeField] private Button endTurnButton;
+        [SerializeField] private Text endTurnButtonText;
+        [SerializeField] private Button restartButton;
+        [SerializeField] private Text restartButtonText;
+
+        [SerializeField] private Button moveUpButton;
+        [SerializeField] private Button moveDownButton;
+        [SerializeField] private Button moveLeftButton;
+        [SerializeField] private Button moveRightButton;
+
+        private TurnManager turnManager;
+
+        public void Initialize(TurnManager manager)
         {
+            turnManager = manager;
             RegisterTexts();
-            EnsureEventSystem();
-            defaultFont = LoadDefaultFont();
-
-            Canvas canvas = CreateCanvas();
-            GameObject panel = CreatePanel(canvas.transform, "HudPanel", new Vector2(12f, -12f), new Vector2(430f, 260f), new Vector2(0f, 1f), new Vector2(0f, 1f));
-            titleText = CreateText(panel.transform, "TitleText", 22, FontStyle.Bold, new Vector2(12f, -10f), new Vector2(406f, 34f), new Vector2(0f, 1f), new Vector2(0f, 1f));
-            objectiveText = CreateText(panel.transform, "ObjectiveText", 14, FontStyle.Normal, new Vector2(12f, -48f), new Vector2(406f, 44f), new Vector2(0f, 1f), new Vector2(0f, 1f));
-            statusText = CreateText(panel.transform, "StatusText", 16, FontStyle.Bold, new Vector2(12f, -96f), new Vector2(406f, 30f), new Vector2(0f, 1f), new Vector2(0f, 1f));
-            turnText = CreateText(panel.transform, "TurnText", 15, FontStyle.Normal, new Vector2(12f, -130f), new Vector2(406f, 30f), new Vector2(0f, 1f), new Vector2(0f, 1f));
-            messageText = CreateText(panel.transform, "MessageText", 14, FontStyle.Normal, new Vector2(12f, -164f), new Vector2(406f, 54f), new Vector2(0f, 1f), new Vector2(0f, 1f));
-            historyText = CreateText(panel.transform, "HistoryText", 12, FontStyle.Italic, new Vector2(12f, -222f), new Vector2(406f, 30f), new Vector2(0f, 1f), new Vector2(0f, 1f));
-
-            CreateRestartButton(canvas.transform, turnManager);
-
-            titleText.text = texts["title"].Display();
-            objectiveText.text = texts["objective"].Display();
-            messageText.text = texts["intro"].Display();
+            ResolveSceneReferences();
+            BindButtons();
+            ApplyStaticText();
+            ShowMessage("intro");
+            UpdateHud(turnManager);
         }
 
         public string ShowMessage(string key, params object[] values)
@@ -61,45 +64,129 @@ namespace DungeonRpg
             return message;
         }
 
-        public void UpdateHud(TurnManager turnManager)
+        public void UpdateHud(TurnManager manager)
         {
-            if (turnManager == null || turnManager.Player == null)
+            if (manager == null || manager.Player == null)
             {
                 return;
             }
 
-            statusText.text = texts["status"].Format(turnManager.Player.CurrentHealth, turnManager.Player.MaxHealth, turnManager.Enemies.Count);
-            turnText.text = GetPhaseText(turnManager.Phase);
-            historyText.text = BuildHistoryText(turnManager);
-
-            if (restartButtonText != null)
+            if (statusText != null)
             {
-                restartButtonText.text = texts["restart"].Display();
+                statusText.text = texts["status"].Format(manager.Player.CurrentHealth, manager.Player.MaxHealth, manager.Enemies.Count);
             }
+
+            if (turnText != null)
+            {
+                turnText.text = GetPhaseText(manager.Phase);
+            }
+
+            if (movementText != null)
+            {
+                movementText.text = texts["movementStatus"].Format(manager.CurrentMovementRoll, manager.RemainingPlayerMoves);
+            }
+
+            if (historyText != null)
+            {
+                historyText.text = BuildHistoryText(manager);
+            }
+
+            bool canRoll = manager.CanRollMovement;
+            bool canMove = manager.CanPlayerMove;
+            bool canAct = manager.CanPlayerUseAction;
+            SetInteractable(rollButton, canRoll);
+            SetInteractable(attackButton, canAct);
+            SetInteractable(endTurnButton, canAct);
+            SetInteractable(moveUpButton, canMove);
+            SetInteractable(moveDownButton, canMove);
+            SetInteractable(moveLeftButton, canMove);
+            SetInteractable(moveRightButton, canMove);
+            SetInteractable(restartButton, true);
         }
 
         private void RegisterTexts()
         {
             texts.Clear();
             texts["title"] = new BilingualText("Mazmorra del D20", "D20 Dungeon");
-            texts["objective"] = new BilingualText("Objetivo: alcanza el tesoro dorado o derrota a todos los enemigos.", "Objective: reach the golden treasure or defeat every enemy.");
-            texts["intro"] = new BilingualText("La aventura comienza. El héroe entra a la mazmorra.", "The adventure begins. The hero enters the dungeon.");
+            texts["objective"] = new BilingualText("Objetivo: tira el dado, avanza por casillas y alcanza el tesoro o derrota enemigos.", "Objective: roll the die, move by tiles and reach the treasure or defeat enemies.");
+            texts["intro"] = new BilingualText("La aventura comienza. Haz clic en el dado para moverte.", "The adventure begins. Click the die to move.");
             texts["status"] = new BilingualText("Vida: {0}/{1} | Enemigos: {2}", "Health: {0}/{1} | Enemies: {2}");
+            texts["movementStatus"] = new BilingualText("Dado: {0} | Movimientos restantes: {1}", "Die: {0} | Moves left: {1}");
             texts["playerTurn"] = new BilingualText("Turno del jugador", "Player turn");
             texts["enemyTurn"] = new BilingualText("Turno de los enemigos", "Enemy turn");
             texts["win"] = new BilingualText("Victoria: la mazmorra ha sido conquistada.", "Victory: the dungeon has been conquered.");
-            texts["lose"] = new BilingualText("Derrota: el héroe cayó en la mazmorra.", "Defeat: the hero fell in the dungeon.");
-            texts["blockedMove"] = new BilingualText("Movimiento bloqueado: esa casilla no está disponible.", "Blocked move: that tile is not available.");
-            texts["playerMoved"] = new BilingualText("{0} se mueve a {1}.", "{0} moves to {1}.");
+            texts["lose"] = new BilingualText("Derrota: el heroe cayo en la mazmorra.", "Defeat: the hero fell in the dungeon.");
+            texts["rollPrompt"] = new BilingualText("Haz clic en el dado o usa Tirar dado para saber cuantas casillas puedes moverte.", "Click the die or use Roll die to know how many tiles you can move.");
+            texts["rollingDie"] = new BilingualText("El dado gira desordenadamente...", "The die is spinning wildly...");
+            texts["rolledMovement"] = new BilingualText("El dado marca {0} y mira a la camara. Puedes moverte {0} casillas.", "The die shows {0} and faces the camera. You can move {0} tiles.");
+            texts["rollFirst"] = new BilingualText("Primero debes tirar el dado.", "You must roll the die first.");
+            texts["noMovesLeft"] = new BilingualText("No quedan movimientos este turno.", "No moves left this turn.");
+            texts["blockedMove"] = new BilingualText("Movimiento bloqueado: esa casilla no esta disponible.", "Blocked move: that tile is not available.");
+            texts["playerMoved"] = new BilingualText("{0} se mueve a {1}. Movimientos restantes: {2}.", "{0} moves to {1}. Moves left: {2}.");
+            texts["playerEndsTurn"] = new BilingualText("El jugador termina su turno.", "The player ends the turn.");
             texts["enemyMoved"] = new BilingualText("{0} avanza a {1}.", "{0} advances to {1}.");
             texts["enemyWaits"] = new BilingualText("{0} espera porque no puede avanzar.", "{0} waits because it cannot advance.");
             texts["noAdjacentEnemy"] = new BilingualText("No hay enemigos adyacentes para atacar.", "There are no adjacent enemies to attack.");
-            texts["attackHit"] = new BilingualText("{0} golpea a {1}. D20: {2}, total: {3}, daño: {4}.", "{0} hits {1}. D20: {2}, total: {3}, damage: {4}.");
-            texts["attackHitDefeated"] = new BilingualText("{0} derrota a {1}. D20: {2}, total: {3}, daño: {4}.", "{0} defeats {1}. D20: {2}, total: {3}, damage: {4}.");
+            texts["attackHit"] = new BilingualText("{0} golpea a {1}. D20: {2}, total: {3}, dano: {4}.", "{0} hits {1}. D20: {2}, total: {3}, damage: {4}.");
+            texts["attackHitDefeated"] = new BilingualText("{0} derrota a {1}. D20: {2}, total: {3}, dano: {4}.", "{0} defeats {1}. D20: {2}, total: {3}, damage: {4}.");
             texts["attackMiss"] = new BilingualText("{0} falla contra {1}. D20: {2}, total: {3}.", "{0} misses {1}. D20: {2}, total: {3}.");
-            texts["defeated"] = new BilingualText("{0} ha sido derrotado.", "{0} has been defeated.");
             texts["restart"] = new BilingualText("Reiniciar", "Restart");
-            texts["history"] = new BilingualText("Último evento: {0}", "Last event: {0}");
+            texts["roll"] = new BilingualText("Tirar dado", "Roll die");
+            texts["attack"] = new BilingualText("Atacar", "Attack");
+            texts["endTurn"] = new BilingualText("Terminar turno", "End turn");
+            texts["history"] = new BilingualText("Ultimo evento: {0}", "Last event: {0}");
+        }
+
+        private void ResolveSceneReferences()
+        {
+            titleText ??= FindText("TitleText");
+            objectiveText ??= FindText("ObjectiveText");
+            statusText ??= FindText("StatusText");
+            turnText ??= FindText("TurnText");
+            movementText ??= FindText("MovementText");
+            messageText ??= FindText("MessageText");
+            historyText ??= FindText("HistoryText");
+
+            rollButton ??= FindButton("RollButton");
+            rollButtonText ??= FindText("RollButtonText");
+            attackButton ??= FindButton("AttackButton");
+            attackButtonText ??= FindText("AttackButtonText");
+            endTurnButton ??= FindButton("EndTurnButton");
+            endTurnButtonText ??= FindText("EndTurnButtonText");
+            restartButton ??= FindButton("RestartButton");
+            restartButtonText ??= FindText("RestartButtonText");
+
+            moveUpButton ??= FindButton("MoveUpButton");
+            moveDownButton ??= FindButton("MoveDownButton");
+            moveLeftButton ??= FindButton("MoveLeftButton");
+            moveRightButton ??= FindButton("MoveRightButton");
+
+            if (FindFirstObjectByType<EventSystem>() == null)
+            {
+                Debug.LogError("Dungeon UI needs an EventSystem already placed in the scene hierarchy.");
+            }
+        }
+
+        private void BindButtons()
+        {
+            BindButton(rollButton, turnManager.RequestPlayerRoll);
+            BindButton(attackButton, turnManager.RequestPlayerAttack);
+            BindButton(endTurnButton, turnManager.EndPlayerTurnEarly);
+            BindButton(restartButton, turnManager.RestartGame);
+            BindButton(moveUpButton, () => turnManager.RequestPlayerMove(GridPosition.Up));
+            BindButton(moveDownButton, () => turnManager.RequestPlayerMove(GridPosition.Down));
+            BindButton(moveLeftButton, () => turnManager.RequestPlayerMove(GridPosition.Left));
+            BindButton(moveRightButton, () => turnManager.RequestPlayerMove(GridPosition.Right));
+        }
+
+        private void ApplyStaticText()
+        {
+            SetText(titleText, texts["title"].Display());
+            SetText(objectiveText, texts["objective"].Display());
+            SetText(rollButtonText, texts["roll"].Display());
+            SetText(attackButtonText, texts["attack"].Display());
+            SetText(endTurnButtonText, texts["endTurn"].Display());
+            SetText(restartButtonText, texts["restart"].Display());
         }
 
         private string GetPhaseText(GamePhase phase)
@@ -119,9 +206,9 @@ namespace DungeonRpg
             }
         }
 
-        private string BuildHistoryText(TurnManager turnManager)
+        private string BuildHistoryText(TurnManager manager)
         {
-            foreach (GameStateSnapshot snapshot in turnManager.History)
+            foreach (GameStateSnapshot snapshot in manager.History)
             {
                 string summary = string.IsNullOrEmpty(snapshot.Summary) ? snapshot.ActorName : snapshot.Summary;
                 return texts["history"].Format(summary);
@@ -130,114 +217,55 @@ namespace DungeonRpg
             return string.Empty;
         }
 
-        private Canvas CreateCanvas()
+        private Text FindText(string objectName)
         {
-            GameObject canvasObject = new GameObject("Dungeon HUD");
-            canvasObject.transform.SetParent(transform, false);
-            Canvas canvas = canvasObject.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            canvas.sortingOrder = 50;
+            GameObject target = GameObject.Find(objectName);
+            Text text = target != null ? target.GetComponent<Text>() : null;
+            if (text == null)
+            {
+                Debug.LogError($"Scene UI is missing Text component: {objectName}.");
+            }
 
-            CanvasScaler scaler = canvasObject.AddComponent<CanvasScaler>();
-            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(1280f, 720f);
-            scaler.matchWidthOrHeight = 0.5f;
-
-            canvasObject.AddComponent<GraphicRaycaster>();
-            return canvas;
-        }
-
-        private GameObject CreatePanel(Transform parent, string objectName, Vector2 anchoredPosition, Vector2 size, Vector2 anchorMin, Vector2 anchorMax)
-        {
-            GameObject panel = new GameObject(objectName);
-            panel.transform.SetParent(parent, false);
-
-            RectTransform rect = panel.AddComponent<RectTransform>();
-            rect.anchorMin = anchorMin;
-            rect.anchorMax = anchorMax;
-            rect.pivot = new Vector2(0f, 1f);
-            rect.anchoredPosition = anchoredPosition;
-            rect.sizeDelta = size;
-
-            Image image = panel.AddComponent<Image>();
-            image.color = new Color(0.06f, 0.07f, 0.09f, 0.86f);
-            return panel;
-        }
-
-        private Text CreateText(Transform parent, string objectName, int fontSize, FontStyle style, Vector2 anchoredPosition, Vector2 size, Vector2 anchorMin, Vector2 anchorMax)
-        {
-            GameObject textObject = new GameObject(objectName);
-            textObject.transform.SetParent(parent, false);
-
-            RectTransform rect = textObject.AddComponent<RectTransform>();
-            rect.anchorMin = anchorMin;
-            rect.anchorMax = anchorMax;
-            rect.pivot = new Vector2(0f, 1f);
-            rect.anchoredPosition = anchoredPosition;
-            rect.sizeDelta = size;
-
-            Text text = textObject.AddComponent<Text>();
-            text.font = defaultFont;
-            text.fontSize = fontSize;
-            text.fontStyle = style;
-            text.color = Color.white;
-            text.alignment = TextAnchor.UpperLeft;
-            text.horizontalOverflow = HorizontalWrapMode.Wrap;
-            text.verticalOverflow = VerticalWrapMode.Truncate;
             return text;
         }
 
-        private void CreateRestartButton(Transform parent, TurnManager turnManager)
+        private Button FindButton(string objectName)
         {
-            GameObject buttonObject = new GameObject("RestartButton");
-            buttonObject.transform.SetParent(parent, false);
+            GameObject target = GameObject.Find(objectName);
+            Button button = target != null ? target.GetComponent<Button>() : null;
+            if (button == null)
+            {
+                Debug.LogError($"Scene UI is missing Button component: {objectName}.");
+            }
 
-            RectTransform rect = buttonObject.AddComponent<RectTransform>();
-            rect.anchorMin = new Vector2(1f, 0f);
-            rect.anchorMax = new Vector2(1f, 0f);
-            rect.pivot = new Vector2(1f, 0f);
-            rect.anchoredPosition = new Vector2(-16f, 16f);
-            rect.sizeDelta = new Vector2(180f, 52f);
-
-            Image image = buttonObject.AddComponent<Image>();
-            image.color = new Color(0.15f, 0.34f, 0.55f, 0.95f);
-
-            Button button = buttonObject.AddComponent<Button>();
-            button.onClick.AddListener(turnManager.RestartGame);
-
-            restartButtonText = CreateText(buttonObject.transform, "RestartButtonText", 16, FontStyle.Bold, new Vector2(0f, 0f), new Vector2(180f, 52f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-            RectTransform textRect = restartButtonText.GetComponent<RectTransform>();
-            textRect.pivot = new Vector2(0.5f, 0.5f);
-            restartButtonText.alignment = TextAnchor.MiddleCenter;
-            restartButtonText.text = texts["restart"].Display();
+            return button;
         }
 
-        private void EnsureEventSystem()
+        private void BindButton(Button button, UnityEngine.Events.UnityAction action)
         {
-            if (FindFirstObjectByType<EventSystem>() != null)
+            if (button == null || action == null)
             {
                 return;
             }
 
-            GameObject eventSystemObject = new GameObject("EventSystem");
-            eventSystemObject.AddComponent<EventSystem>();
-            eventSystemObject.AddComponent<InputSystemUIInputModule>();
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(action);
         }
 
-        private Font LoadDefaultFont()
+        private void SetText(Text text, string value)
         {
-            Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            if (font == null)
+            if (text != null)
             {
-                font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+                text.text = value;
             }
+        }
 
-            if (font == null)
+        private void SetInteractable(Button button, bool interactable)
+        {
+            if (button != null)
             {
-                font = Font.CreateDynamicFontFromOSFont(new[] { "Arial", "Liberation Sans" }, 16);
+                button.interactable = interactable;
             }
-
-            return font;
         }
     }
 }

@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -12,6 +13,7 @@ namespace DungeonRpg
         private readonly Stack<GameStateSnapshot> history = new Stack<GameStateSnapshot>();
 
         private readonly CombatResolver combatResolver = new CombatResolver();
+        [SerializeField] private DynamicDice movementDie;
         private GridPosition treasurePosition;
         private UIManager uiManager;
         private int turnNumber;
@@ -19,6 +21,14 @@ namespace DungeonRpg
 
         public GamePhase Phase { get; private set; } = GamePhase.Setup;
         public PlayerCharacter Player { get; private set; }
+        public int CurrentMovementRoll { get; private set; }
+        public int RemainingPlayerMoves { get; private set; }
+        public bool PlayerHasRolledMovement { get; private set; }
+        public bool IsRollingMovementDie { get; private set; }
+        public bool IsPlayerTurnActive => Phase == GamePhase.PlayerTurn && Player != null && Player.IsAlive;
+        public bool CanRollMovement => IsPlayerTurnActive && !PlayerHasRolledMovement && !IsRollingMovementDie;
+        public bool CanPlayerMove => IsPlayerTurnActive && PlayerHasRolledMovement && !IsRollingMovementDie && RemainingPlayerMoves > 0;
+        public bool CanPlayerUseAction => IsPlayerTurnActive && PlayerHasRolledMovement && !IsRollingMovementDie;
         public IReadOnlyList<Character> ActiveCharacters => activeCharacters;
         public IReadOnlyList<EnemyCharacter> Enemies => enemies;
         public IEnumerable<GameStateSnapshot> History => history;
@@ -53,6 +63,12 @@ namespace DungeonRpg
             }
         }
 
+        public void SetMovementDie(DynamicDice die)
+        {
+            movementDie = die;
+            movementDie?.SetTurnManager(this);
+        }
+
         public void StartGame()
         {
             turnNumber = 0;
@@ -74,6 +90,98 @@ namespace DungeonRpg
             }
 
             return queue;
+        }
+
+        public void RequestPlayerRoll()
+        {
+            if (!CanRollMovement)
+            {
+                if (IsPlayerTurnActive && !PlayerHasRolledMovement)
+                {
+                    ReportMessage("rollingDie");
+                }
+
+                return;
+            }
+
+            StartCoroutine(RollPlayerMovement());
+        }
+
+        public void RequestPlayerMove(GridPosition direction)
+        {
+            if (Player != null)
+            {
+                Player.TryMoveDirection(direction);
+            }
+        }
+
+        public void RequestPlayerAttack()
+        {
+            if (Player != null)
+            {
+                Player.TryAttackAction();
+            }
+        }
+
+        public void EndPlayerTurnEarly()
+        {
+            if (!IsPlayerTurnActive)
+            {
+                return;
+            }
+
+            if (!PlayerHasRolledMovement)
+            {
+                ReportMessage("rollFirst");
+                uiManager?.UpdateHud(this);
+                return;
+            }
+
+            ReportMessage("playerEndsTurn");
+            Player?.StopAcceptingInput();
+            CompleteActorTurn(Player);
+        }
+
+        public bool TryConsumePlayerMove(PlayerCharacter playerCharacter, GridPosition targetPosition)
+        {
+            if (playerCharacter != Player || !IsPlayerTurnActive)
+            {
+                return false;
+            }
+
+            if (!PlayerHasRolledMovement)
+            {
+                ReportMessage("rollFirst");
+                uiManager?.UpdateHud(this);
+                return false;
+            }
+
+            if (RemainingPlayerMoves <= 0)
+            {
+                ReportMessage("noMovesLeft");
+                uiManager?.UpdateHud(this);
+                return false;
+            }
+
+            RemainingPlayerMoves--;
+            ReportMessage("playerMoved", playerCharacter.DisplayName, targetPosition, RemainingPlayerMoves);
+
+            if (CheckEndConditions())
+            {
+                return true;
+            }
+
+            if (RemainingPlayerMoves <= 0)
+            {
+                Player.StopAcceptingInput();
+                CompleteActorTurn(Player);
+            }
+            else
+            {
+                uiManager?.UpdateHud(this);
+            }
+
+            return true;
         }
 
         public void CompleteActorTurn(ITurnActor actor)
@@ -179,6 +287,11 @@ namespace DungeonRpg
                 }
 
                 Phase = actor is PlayerCharacter ? GamePhase.PlayerTurn : GamePhase.EnemyTurn;
+                if (Phase == GamePhase.PlayerTurn)
+                {
+                    PreparePlayerTurn();
+                }
+
                 uiManager?.UpdateHud(this);
                 actor.BeginTurn(this);
                 return;
@@ -186,6 +299,41 @@ namespace DungeonRpg
 
             RebuildTurnQueue();
             BeginNextTurn();
+        }
+
+        private IEnumerator RollPlayerMovement()
+        {
+            IsRollingMovementDie = true;
+            ReportMessage("rollingDie");
+            uiManager?.UpdateHud(this);
+
+            int result = 1;
+            if (movementDie != null)
+            {
+                yield return movementDie.Roll(value => result = value);
+            }
+            else
+            {
+                yield return new WaitForSeconds(0.35f);
+                result = Random.Range(1, 7);
+            }
+
+            CurrentMovementRoll = result;
+            RemainingPlayerMoves = result;
+            PlayerHasRolledMovement = true;
+            IsRollingMovementDie = false;
+            ReportMessage("rolledMovement", result);
+            uiManager?.UpdateHud(this);
+        }
+
+        private void PreparePlayerTurn()
+        {
+            CurrentMovementRoll = 0;
+            RemainingPlayerMoves = 0;
+            PlayerHasRolledMovement = false;
+            IsRollingMovementDie = false;
+            movementDie?.ResetVisual();
+            ReportMessage("rollPrompt");
         }
 
         private void RebuildTurnQueue()
